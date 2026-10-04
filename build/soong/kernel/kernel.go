@@ -148,6 +148,7 @@ func (m *kernelModule) createModuleInstallers(ctx android.LoadHookContext) {
 	if !proptools.Bool(m.properties.Modules.Enabled) {
 		return
 	}
+	var soongOnlyRequiredInstallers []string
 	type installer struct {
 		name         string
 		blocklist    *string
@@ -189,6 +190,17 @@ func (m *kernelModule) createModuleInstallers(ctx android.LoadHookContext) {
 			&struct{ Name *string }{Name: proptools.StringPtr(name)},
 			&props,
 			partitionProps)
+		if item.name == "system_dlkm" || item.name == "vendor_dlkm" {
+			soongOnlyRequiredInstallers = append(soongOnlyRequiredInstallers, name)
+		}
+	}
+	if !ctx.Config().KatiEnabled() && len(soongOnlyRequiredInstallers) > 0 {
+		// Kati adds these installer archives to the default installed-module set.
+		// Soong-only builds need an explicit required edge from the selected kernel
+		// module so fsgen can include each installer in its own DLKM filesystem.
+		ctx.AppendProperties(&struct {
+			Required proptools.Configurable[[]string]
+		}{Required: proptools.NewSimpleConfigurable(soongOnlyRequiredInstallers)})
 	}
 }
 
