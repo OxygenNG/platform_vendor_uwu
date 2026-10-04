@@ -148,7 +148,7 @@ func (m *kernelModule) createModuleInstallers(ctx android.LoadHookContext) {
 	if !proptools.Bool(m.properties.Modules.Enabled) {
 		return
 	}
-	var soongOnlyRequiredInstallers []string
+	var requiredInstallers []string
 	type installer struct {
 		name         string
 		blocklist    *string
@@ -190,17 +190,16 @@ func (m *kernelModule) createModuleInstallers(ctx android.LoadHookContext) {
 			&struct{ Name *string }{Name: proptools.StringPtr(name)},
 			&props,
 			partitionProps)
-		if item.name == "system_dlkm" || item.name == "vendor_dlkm" {
-			soongOnlyRequiredInstallers = append(soongOnlyRequiredInstallers, name)
-		}
+		requiredInstallers = append(requiredInstallers, name)
 	}
-	if !ctx.Config().KatiEnabled() && len(soongOnlyRequiredInstallers) > 0 {
-		// Kati adds these installer archives to the default installed-module set.
-		// Soong-only builds need an explicit required edge from the selected kernel
-		// module so fsgen can include each installer in its own DLKM filesystem.
+	if len(requiredInstallers) > 0 {
+		// The selected kernel must bring every installer into the product dependency
+		// closure. Kati selects DLKM installers by default, but does not select the
+		// vendor_ramdisk or recovery installers; fsgen needs explicit required edges
+		// for all four partition images in Soong-only builds as well.
 		ctx.AppendProperties(&struct {
 			Required proptools.Configurable[[]string]
-		}{Required: proptools.NewSimpleConfigurable(soongOnlyRequiredInstallers)})
+		}{Required: proptools.NewSimpleConfigurable(requiredInstallers)})
 	}
 }
 
