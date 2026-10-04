@@ -37,7 +37,17 @@ type Mkdir struct {
 	properties MkdirProperties
 
 	installDir android.InstallPath
-	output android.ModuleOutPath
+	output     android.ModuleOutPath
+}
+
+// SoongFilesystemDirs reports directories this module creates in its install partition.
+// fsgen consumes this metadata when Make/Kati is disabled, because AndroidMk install
+// entries are not used to populate generated filesystem images in that mode.
+func (this *Mkdir) SoongFilesystemDirs() []string {
+	if this.properties.Dir == "" {
+		return nil
+	}
+	return []string{this.properties.Dir}
 }
 
 func (this *Mkdir) GenerateAndroidBuildActions(ctx android.ModuleContext) {
@@ -58,7 +68,7 @@ func (this *Mkdir) AndroidMkEntries() []android.AndroidMkEntries {
 		Class: "FAKE",
 		// Need at least one output file in order for this to take effect.
 		OutputFile: android.OptionalPathForPath(this.output),
-		Include: "vendor/uwu/build/core/mkdir.mk",
+		Include:    "vendor/uwu/build/core/mkdir.mk",
 		ExtraEntries: []android.AndroidMkExtraEntriesFunc{
 			func(ctx android.AndroidMkExtraEntriesContext, entries *android.AndroidMkEntries) {
 				entries.SetString("LOCAL_SOONG_INSTALL_DIR", this.installDir.String())
