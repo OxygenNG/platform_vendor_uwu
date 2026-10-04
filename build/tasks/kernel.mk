@@ -521,6 +521,20 @@ KERNEL_VENDOR_RAMDISK_DEPMOD_STAGING_DIR := $(KERNEL_BUILD_OUT_PREFIX)$(call int
 $(INSTALLED_RAMDISK_TARGET): $(TARGET_PREBUILT_INT_KERNEL)
 endif
 
+# The kernel target also stages BOOT_KERNEL_MODULES as side effects. Give that
+# staging step an explicit output so Kati/Ninja can track its completion and
+# make the ramdisk image wait for it. Keep the marker outside the ramdisk tree
+# so it cannot accidentally be packaged into the image.
+ifneq ($(BOOT_KERNEL_MODULES)$(BOOT_KERNEL_MODULES_FINDER),)
+KERNEL_VENDOR_RAMDISK_MODULES_STAMP := $(KERNEL_OUT)/vendor_ramdisk_modules.stamp
+$(TARGET_PREBUILT_INT_KERNEL): .KATI_IMPLICIT_OUTPUTS += $(KERNEL_VENDOR_RAMDISK_MODULES_STAMP)
+ifneq (,$(filter dlkm,$(BOARD_VENDOR_RAMDISK_FRAGMENTS)))
+$(INTERNAL_VENDOR_RAMDISK_FRAGMENT_TARGETS): $(KERNEL_VENDOR_RAMDISK_MODULES_STAMP)
+else
+$(INTERNAL_VENDOR_RAMDISK_TARGET): $(KERNEL_VENDOR_RAMDISK_MODULES_STAMP)
+endif
+endif
+
 ifneq ($(RECOVERY_KERNEL_MODULES)$(RECOVERY_KERNEL_MODULES_FINDER),)
 KERNEL_RECOVERY_DEPMOD_STAGING_DIR := $(KERNEL_BUILD_OUT_PREFIX)$(call intermediates-dir-for,PACKAGING,depmod_recovery)
 KERNEL_RECOVERY_MODULES_OUT := $(TARGET_RECOVERY_ROOT_OUT)
@@ -631,6 +645,7 @@ $(TARGET_PREBUILT_INT_KERNEL): $(KERNEL_CONFIG) $(DEPMOD) $(DTC) $(BOOT_KERNEL_M
 				fi; \
 			) \
 		fi
+	$(if $(BOOT_KERNEL_MODULES)$(BOOT_KERNEL_MODULES_FINDER),mkdir -p $(dir $(KERNEL_VENDOR_RAMDISK_MODULES_STAMP)) && touch $(KERNEL_VENDOR_RAMDISK_MODULES_STAMP))
 
 .PHONY: kerneltags
 kerneltags: $(KERNEL_CONFIG)
@@ -783,6 +798,7 @@ $(TARGET_PREBUILT_INT_KERNEL): $(DEPMOD) $(KERNEL_MODULES_PARTITION_FILE_LIST) $
 	)
 	vendor_modules=$$(comm -23 <(find $(KERNEL_OUT) -maxdepth 1 -type f -name '*.ko' | awk -F'/' '{ print $$NF }' | sort) <(awk -F'/' '{ print $$NF }' $(KERNEL_OUT)/system_dlkm.modules.load | sort) | sed 's|^|$(KERNEL_OUT)/|'); \
 	($(call build-image-kernel-modules-lineage,$$vendor_modules,$(KERNEL_MODULES_OUT),$(KERNEL_MODULE_MOUNTPOINT)/,$(KERNEL_DEPMOD_STAGING_DIR),$(BOARD_VENDOR_KERNEL_MODULES_LOAD),,$(KERNEL_MODULES_PARTITION_FILE_LIST),$(SYSTEM_KERNEL_DEPMOD_STAGING_DIR)/lib/modules/0.0/$(SYSTEM_KERNEL_MODULE_MOUNTPOINT)))
+	$(if $(BOOT_KERNEL_MODULES)$(BOOT_KERNEL_MODULES_FINDER),mkdir -p $(dir $(KERNEL_VENDOR_RAMDISK_MODULES_STAMP)) && touch $(KERNEL_VENDOR_RAMDISK_MODULES_STAMP))
 
 ifeq ($(BOARD_INCLUDE_DTB_IN_BOOTIMG),true)
 $(INSTALLED_DTBIMAGE_TARGET): $(TARGET_PREBUILT_INT_KERNEL)
