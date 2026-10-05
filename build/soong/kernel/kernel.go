@@ -192,11 +192,11 @@ func (m *kernelModule) createModuleInstallers(ctx android.LoadHookContext) {
 			partitionProps)
 		requiredInstallers = append(requiredInstallers, name)
 	}
-	if len(requiredInstallers) > 0 {
+	if !ctx.Config().KatiEnabled() && len(requiredInstallers) > 0 {
 		// The selected kernel must bring every installer into the product dependency
-		// closure. Kati selects DLKM installers by default, but does not select the
-		// vendor_ramdisk or recovery installers; fsgen needs explicit required edges
-		// for all four partition images in Soong-only builds as well.
+		// closure in Soong-only builds. Kati selects the DLKM installers through its
+		// default installed-module set; making the kernel require its own installer
+		// would form a dependency cycle because the installer consumes kernel{.modules}.
 		ctx.AppendProperties(&struct {
 			Required proptools.Configurable[[]string]
 		}{Required: proptools.NewSimpleConfigurable(requiredInstallers)})
