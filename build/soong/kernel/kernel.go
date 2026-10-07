@@ -65,9 +65,10 @@ type moduleSetProperties struct {
 	Vendor_dlkm_module_blocklist    *string
 	Vendor_dlkm_install_all         *bool
 
-	Vendor_ramdisk_module_install_list []string
-	Vendor_ramdisk_module_load_list    []string
-	Vendor_ramdisk_module_blocklist    *string
+	Vendor_ramdisk_module_install_list       []string
+	Vendor_ramdisk_module_load_list          []string
+	Vendor_ramdisk_recovery_module_load_list []string
+	Vendor_ramdisk_module_blocklist          *string
 
 	Recovery_module_install_list []string
 	Recovery_module_load_list    []string
@@ -150,16 +151,30 @@ func (m *kernelModule) createModuleInstallers(ctx android.LoadHookContext) {
 	}
 	var requiredInstallers []string
 	type installer struct {
-		name         string
-		blocklist    *string
-		loadLists    []string
-		installLists []string
+		name                string
+		blocklist           *string
+		loadLists           []string
+		installLists        []string
+		additionalLoadFiles []platformkernel.AdditionalLoadFile
 	}
 	installers := []installer{
-		{"system_dlkm", m.properties.Modules.System_dlkm_module_blocklist, m.properties.Modules.System_dlkm_module_load_list, m.properties.Modules.System_dlkm_module_install_list},
-		{"vendor_dlkm", m.properties.Modules.Vendor_dlkm_module_blocklist, m.properties.Modules.Vendor_dlkm_module_load_list, m.properties.Modules.Vendor_dlkm_module_install_list},
-		{"vendor_ramdisk", m.properties.Modules.Vendor_ramdisk_module_blocklist, m.properties.Modules.Vendor_ramdisk_module_load_list, m.properties.Modules.Vendor_ramdisk_module_install_list},
-		{"recovery", m.properties.Modules.Recovery_module_blocklist, m.properties.Modules.Recovery_module_load_list, m.properties.Modules.Recovery_module_install_list},
+		{name: "system_dlkm", blocklist: m.properties.Modules.System_dlkm_module_blocklist, loadLists: m.properties.Modules.System_dlkm_module_load_list, installLists: m.properties.Modules.System_dlkm_module_install_list},
+		{name: "vendor_dlkm", blocklist: m.properties.Modules.Vendor_dlkm_module_blocklist, loadLists: m.properties.Modules.Vendor_dlkm_module_load_list, installLists: m.properties.Modules.Vendor_dlkm_module_install_list},
+		{name: "vendor_ramdisk", blocklist: m.properties.Modules.Vendor_ramdisk_module_blocklist, loadLists: m.properties.Modules.Vendor_ramdisk_module_load_list, installLists: m.properties.Modules.Vendor_ramdisk_module_install_list},
+		{name: "recovery", blocklist: m.properties.Modules.Recovery_module_blocklist, loadLists: m.properties.Modules.Recovery_module_load_list, installLists: m.properties.Modules.Recovery_module_install_list},
+	}
+	if len(m.properties.Modules.Vendor_ramdisk_recovery_module_load_list) > 0 {
+		if len(m.properties.Modules.Vendor_ramdisk_module_install_list) == 0 || len(m.properties.Modules.Vendor_ramdisk_module_load_list) == 0 {
+			ctx.PropertyErrorf("modules.vendor_ramdisk_recovery_module_load_list", "requires vendor_ramdisk_module_install_list and vendor_ramdisk_module_load_list")
+		}
+		for i := range installers {
+			if installers[i].name == "vendor_ramdisk" {
+				installers[i].additionalLoadFiles = []platformkernel.AdditionalLoadFile{{
+					Source:  "modules.load.vendor_ramdisk_recovery",
+					Install: "modules.load.recovery",
+				}}
+			}
+		}
 	}
 	hasSystemDlkm := len(m.properties.Modules.System_dlkm_module_install_list) > 0 &&
 		len(m.properties.Modules.System_dlkm_module_load_list) > 0
@@ -175,6 +190,7 @@ func (m *kernelModule) createModuleInstallers(ctx android.LoadHookContext) {
 		props.Zip.Src = proptools.StringPtr(":" + ctx.ModuleName() + "{.modules}")
 		props.Zip.Load_file = proptools.StringPtr("modules.load." + item.name)
 		props.Zip.Install_file = proptools.StringPtr("modules.install." + item.name)
+		props.Zip.Additional_load_files = item.additionalLoadFiles
 		if item.name == "vendor_dlkm" && hasSystemDlkm {
 			props.System_dep = proptools.StringPtr(":" + ctx.ModuleName() + "_modules_system_dlkm{.modules.zip}")
 		}
@@ -1062,6 +1078,18 @@ func (m *kernelModule) buildModules(ctx android.ModuleContext, source, buildRoot
 		{"vendor_ramdisk", m.properties.Modules.Vendor_ramdisk_module_install_list, m.properties.Modules.Vendor_ramdisk_module_load_list, m.properties.Modules.Vendor_ramdisk_module_blocklist, false},
 		{"recovery", m.properties.Modules.Recovery_module_install_list, m.properties.Modules.Recovery_module_load_list, m.properties.Modules.Recovery_module_blocklist, false},
 	}
+	if len(m.properties.Modules.Vendor_ramdisk_recovery_module_load_list) > 0 {
+		moduleSets = append(moduleSets, struct {
+			name        string
+			installList []string
+			loadList    []string
+			blocklist   *string
+			installAll  bool
+		}{
+			name:     "vendor_ramdisk_recovery",
+			loadList: m.properties.Modules.Vendor_ramdisk_recovery_module_load_list,
+		})
+	}
 	systemInstallFile := filepath.Join(flat.String(), "modules.install.system_dlkm")
 	for _, set := range moduleSets {
 		if len(set.installList) == 0 && len(set.loadList) == 0 {
@@ -1069,14 +1097,20 @@ func (m *kernelModule) buildModules(ctx android.ModuleContext, source, buildRoot
 		}
 		installFile := "modules.install." + set.name
 		loadFile := "modules.load." + set.name
-		if set.installAll {
-			m.writeAllVendorModuleList(cmd, flat.String(), installFile, systemInstallFile,
-				len(m.properties.Modules.System_dlkm_module_install_list) > 0)
-		} else {
-			m.writeModuleListFile(ctx, cmd, flat.String(), installFile, set.installList)
+		if len(set.installList) > 0 {
+			if set.installAll {
+				m.writeAllVendorModuleList(cmd, flat.String(), installFile, systemInstallFile,
+					len(m.properties.Modules.System_dlkm_module_install_list) > 0)
+			} else {
+				m.writeModuleListFile(ctx, cmd, flat.String(), installFile, set.installList)
+			}
 		}
 		m.writeModuleLoadFile(ctx, cmd, flat.String(), set.name, set.loadList)
-		cmd.Text("&& missing=$(awk 'FILENAME==ARGV[1] { seen[$0]=1; next } !($0 in seen)'").Text(filepath.Join(flat.String(), installFile)).Text(filepath.Join(flat.String(), loadFile)).Text("); test -z \"$missing\" || { echo \"modules in load list but not install list: $missing\" >&2; exit 1; }")
+		if set.name == "vendor_ramdisk_recovery" {
+			cmd.Text("&& missing=$(awk 'FILENAME==ARGV[1] { seen[$0]=1; next } !($0 in seen)'").Text(filepath.Join(flat.String(), "modules.install.vendor_ramdisk")).Text(filepath.Join(flat.String(), loadFile)).Text("); test -z \"$missing\" || { echo \"modules in vendor ramdisk recovery load list but not installed in vendor ramdisk: $missing\" >&2; exit 1; }")
+		} else {
+			cmd.Text("&& missing=$(awk 'FILENAME==ARGV[1] { seen[$0]=1; next } !($0 in seen)'").Text(filepath.Join(flat.String(), installFile)).Text(filepath.Join(flat.String(), loadFile)).Text("); test -z \"$missing\" || { echo \"modules in load list but not install list: $missing\" >&2; exit 1; }")
+		}
 		m.writeModuleBlocklist(ctx, cmd, flat.String(), set.name, set.blocklist)
 	}
 	cmd.Text("&& prebuilts/build-tools/linux-x86/bin/soong_zip -C").Text(flat.String()).Text("-D").Text(flat.String()).Text("-o").Output(output)
