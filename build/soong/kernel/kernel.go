@@ -26,6 +26,7 @@ import (
 
 	"android/soong/android"
 	platformkernel "android/soong/kernel"
+	"android/soong/phony"
 )
 
 type configProperties struct {
@@ -146,10 +147,11 @@ func kernelFactory() android.Module {
 }
 
 func (m *kernelModule) createModuleInstallers(ctx android.LoadHookContext) {
+	var requiredInstallers []string
 	if !proptools.Bool(m.properties.Modules.Enabled) {
+		createModulesAggregate(ctx, requiredInstallers)
 		return
 	}
-	var requiredInstallers []string
 	type installer struct {
 		name                string
 		blocklist           *string
@@ -208,15 +210,24 @@ func (m *kernelModule) createModuleInstallers(ctx android.LoadHookContext) {
 			partitionProps)
 		requiredInstallers = append(requiredInstallers, name)
 	}
-	if !ctx.Config().KatiEnabled() && len(requiredInstallers) > 0 {
-		// The selected kernel must bring every installer into the product dependency
-		// closure in Soong-only builds. Kati selects the DLKM installers through its
-		// default installed-module set; making the kernel require its own installer
-		// would form a dependency cycle because the installer consumes kernel{.modules}.
-		ctx.AppendProperties(&struct {
-			Required proptools.Configurable[[]string]
-		}{Required: proptools.NewSimpleConfigurable(requiredInstallers)})
+	createModulesAggregate(ctx, requiredInstallers)
+}
+
+func createModulesAggregate(ctx android.LoadHookContext, requiredInstallers []string) {
+	if ctx.Config().KatiEnabled() {
+		return
 	}
+	// Keep installer selection outside the kernel module: each installer consumes
+	// kernel{.modules}, so requiring it from the kernel itself creates a cycle.
+	ctx.CreateModule(phony.PhonyFactory,
+		&struct {
+			Name     *string
+			Required []string
+		}{
+			Name:     proptools.StringPtr(ctx.ModuleName() + "_modules_installers"),
+			Required: requiredInstallers,
+		},
+	)
 }
 
 func usesLegacyMakeBlocklist(ctx android.LoadHookContext, partition string) bool {
