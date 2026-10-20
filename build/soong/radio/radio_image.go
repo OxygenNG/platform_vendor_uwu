@@ -15,6 +15,8 @@
 package radio
 
 import (
+	"path/filepath"
+
 	"github.com/google/blueprint/proptools"
 
 	"android/soong/android"
@@ -29,6 +31,10 @@ func init() {
 type prebuiltImageProperties struct {
 	// Path to the prebuilt image relative to the module directory.
 	Src *string `android:"path"`
+
+	// Output image filename, independent of the Soong module name.
+	// Defaults to <module name>.img for existing device configurations.
+	Filename *string
 
 	// Optional expected SHA-1 of the source file. When set, the build
 	// fails if the actual digest does not match.
@@ -57,7 +63,12 @@ func (p *prebuiltImage) GenerateAndroidBuildActions(ctx android.ModuleContext) {
 	}
 
 	srcPath := android.PathForModuleSrc(ctx, proptools.String(p.properties.Src))
-	outputPath := android.PathForModuleOut(ctx, ctx.ModuleName()+".img")
+	filename := proptools.StringDefault(p.properties.Filename, ctx.ModuleName()+".img")
+	if filename == "" || filename == "." || filename == ".." || filepath.Base(filename) != filename {
+		ctx.PropertyErrorf("filename", "must be a non-empty filename without directories")
+		return
+	}
+	outputPath := android.PathForModuleOut(ctx, filename)
 
 	builder := android.NewRuleBuilder(pctx, ctx)
 
