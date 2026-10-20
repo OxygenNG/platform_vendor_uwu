@@ -688,8 +688,8 @@ ifeq ($(BOARD_USES_QCOM_MERGE_DTBS_SCRIPT),true)
 	$(MKDTBOIMG) create $@ --page_size=$(BOARD_KERNEL_PAGESIZE) $(shell find $(DTBS_OUT) -type f -name "${TARGET_MERGE_DTBOS_WILDCARD}.dtbo" | sort)
 else
 	$(hide) find $(DTBO_OUT)/arch/$(KERNEL_ARCH)/boot/dts -type f -name "*.dtbo" | xargs rm -f
-	$(call make-dtbo-target,$(KERNEL_DEFCONFIG))
-	$(call make-dtbo-target,$(TARGET_KERNEL_DTB))
+	$(call make-kernel-config,$(DTBO_OUT),$(ALL_KERNEL_DEFCONFIG_SRCS))
+	$(call make-dtbo-target,dtbs)
 ifeq ($(BOARD_KERNEL_SEPARATED_DTBO),true)
 ifdef BOARD_DTBO_CFG
 	$(MKDTBOIMG) cfg_create $@ $(BOARD_DTBO_CFG) -d $(DTBO_OUT)/arch/$(KERNEL_ARCH)/boot/dts
